@@ -65,12 +65,12 @@ ESP32Encoder enc1, enc2;
 // PINOS (A tua montagem)
 #define M1_ENCA 4  
 #define M1_ENCB 16 
-#define M2_ENCA 18 
-#define M2_ENCB 19 
-#define M1_PWM 26 
-#define M1_DIR 27 
-#define M2_PWM 33
-#define M2_DIR 25
+#define M2_ENCA 22 
+#define M2_ENCB 23 
+#define M1_PWM 19 
+#define M1_DIR 21 
+#define M2_PWM 5
+#define M2_DIR 18
 
 // VARIÁVEIS DO SISTEMA
 float kp = 0.4, kd = 0.03, ki = 0.5;
