@@ -1,56 +1,54 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-#include <ESP32Encoder.h>
+#include <QTRSensors.h>
 #include <ArduinoOTA.h> 
 
 // ==========================================
-// PÁGINA WEB (COM BOTÕES "HOLD TO MOVE")
+// PÁGINA WEB (A TUA BOX DE AFINAÇÃO)
 // ==========================================
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { text-align:center; font-family: Arial; background-color: #222; color: white; padding: 10px; margin: 0;}
-    /* touch-action: none é CRÍTICO para o telemóvel não tentar fazer scroll enquanto conduzes! */
-    .btn { padding: 25px 30px; font-size: 20px; margin: 5px; border-radius: 10px; cursor: pointer; border: none; font-weight: bold; touch-action: none; user-select: none; -webkit-user-select: none;}
-    .btn-dir { background-color: #3498db; color: white; }
-    .btn-dir:active { background-color: #2980b9; }
+    .btn { padding: 15px 20px; font-size: 18px; margin: 5px; border-radius: 10px; cursor: pointer; border: none; font-weight: bold; width: 90%;}
+    .btn-cal { background-color: #f39c12; color: white; }
+    .btn-start { background-color: #2ecc71; color: white; }
     .btn-stop { background-color: #e74c3c; color: white; }
     .slider-container { background: #333; padding: 10px; border-radius: 10px; margin: 10px 0; }
     input[type=range] { width: 85%; margin: 10px; }
-    .val-display { font-weight: bold; color: #2ecc71; }
-    .controls { display: inline-block; margin-top: 20px; }
+    .val-display { font-weight: bold; color: #3498db; }
   </style>
 </head>
 <body>
-  <h2>Controlo Contínuo + Tuning</h2>
+  <h2>Robô Dragster Tuning</h2>
   
-  <div class="controls">
-    <button class="btn btn-dir" onpointerdown="send('frente')" onpointerup="send('parar')" onpointerleave="send('parar')">FRENTE</button><br>
-    <button class="btn btn-dir" onpointerdown="send('esquerda')" onpointerup="send('parar')" onpointerleave="send('parar')">ESQ</button>
-    <button class="btn btn-stop" onpointerdown="send('parar')">PARAR</button>
-    <button class="btn btn-dir" onpointerdown="send('direita')" onpointerup="send('parar')" onpointerleave="send('parar')">DIR</button><br>
-    <button class="btn btn-dir" onpointerdown="send('tras')" onpointerup="send('parar')" onpointerleave="send('parar')">TRAS</button>
-  </div>
+  <button class="btn btn-cal" onclick="send('calibrar')">1. CALIBRAR SENSORES</button>
+  <button class="btn btn-start" onclick="send('correr')">2. ARRANCAR (RACE!)</button>
+  <button class="btn btn-stop" onclick="send('parar')">PARAR EMERGÊNCIA</button>
 
-  <div class="slider-container" style="margin-top:30px;">
-    <label>Kp: <span id="kp_val" class="val-display">0.40</span></label><br>
-    <input type="range" min="0" max="2" step="0.01" value="0.40" onchange="updatePID('kp', this.value)">
+  <div class="slider-container">
+    <label>Velocidade Base: <span id="vel_val" class="val-display">100</span></label><br>
+    <input type="range" min="0" max="250" step="5" value="100" onchange="updateVal('vel', this.value)">
   </div>
   <div class="slider-container">
-    <label>Ki: <span id="ki_val" class="val-display">0.50</span></label><br>
-    <input type="range" min="0" max="2" step="0.01" value="0.50" onchange="updatePID('ki', this.value)">
+    <label>Kp (Curvar): <span id="kp_val" class="val-display">0.05</span></label><br>
+    <input type="range" min="0" max="0.5" step="0.01" value="0.05" onchange="updateVal('kp', this.value)">
   </div>
   <div class="slider-container">
-    <label>Kd: <span id="kd_val" class="val-display">0.03</span></label><br>
-    <input type="range" min="0" max="0.5" step="0.005" value="0.03" onchange="updatePID('kd', this.value)">
+    <label>Kd (Travar Oscilação): <span id="kd_val" class="val-display">0.80</span></label><br>
+    <input type="range" min="0" max="3" step="0.05" value="0.80" onchange="updateVal('kd', this.value)">
+  </div>
+  <div class="slider-container">
+    <label>Ki (Erro Constante): <span id="ki_val" class="val-display">0.000</span></label><br>
+    <input type="range" min="0" max="0.01" step="0.0001" value="0.000" onchange="updateVal('ki', this.value)">
   </div>
 
   <script>
     function send(cmd) { fetch('/' + cmd); }
-    function updatePID(param, val) {
+    function updateVal(param, val) {
       document.getElementById(param + '_val').innerHTML = val;
       fetch('/update?param=' + param + '&value=' + val);
     }
@@ -60,26 +58,30 @@ const char index_html[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 AsyncWebServer server(80);
-ESP32Encoder enc1, enc2;
+QTRSensors qtr;
 
-// PINOS (A tua montagem)
-#define M1_ENCA 4  
-#define M1_ENCB 16 
-#define M2_ENCA 18 
-#define M2_ENCB 19 
-#define M1_PWM 26 
-#define M1_DIR 27 
-#define M2_PWM 33
-#define M2_DIR 25
+// ==========================================
+// PINOS FISICOS (Conforme a tua imagem!)
+// ==========================================
+// Os teus 6 pinos de Ouro (ADC1)
+const uint8_t SensorCount = 6;
+uint16_t sensorValues[SensorCount];
+const uint8_t qtrPins[] = {36, 39, 34, 35, 32, 33};
 
-// VARIÁVEIS DO SISTEMA
-float kp = 0.4, kd = 0.03, ki = 0.5;
-long target1 = 0, target2 = 0;
-long prevT = 0;
-float eprev1 = 0, eintegral1 = 0;
-float eprev2 = 0, eintegral2 = 0;
+// Os pinos dos teus Motores
+#define M1_PWM 19 
+#define M1_DIR 21 
+#define M2_PWM 5 
+#define M2_DIR 18
 
-// O ESTADO DO CARRO
+// ==========================================
+// VARIÁVEIS DO PID E ESTADO
+// ==========================================
+float Kp = 0.05, Kd = 0.80, Ki = 0.00;
+int baseSpeed = 100;
+int lastError = 0;
+float I = 0;
+
 String estadoCarro = "parar";
 
 void setMotor(int speed, int pinPWM, int pinDIR);
@@ -87,12 +89,19 @@ void setMotor(int speed, int pinPWM, int pinDIR);
 void setup() {
   Serial.begin(115200);
 
-  // 1. WiFi e OTA
-  WiFi.softAP("Robo_ESP32", "12345678");
-  ArduinoOTA.setHostname("MeuRoboPID");
-  ArduinoOTA.begin();
+  // 1. Configurar QTR como ANALÓGICO!
+  qtr.setTypeAnalog();
+  qtr.setSensorPins(qtrPins, SensorCount);
 
-  // 2. Rotas do Servidor
+  // 2. Configurar Motores
+  pinMode(M1_PWM, OUTPUT); pinMode(M1_DIR, OUTPUT);
+  pinMode(M2_PWM, OUTPUT); pinMode(M2_DIR, OUTPUT);
+
+  // 3. WiFi e Servidor
+  WiFi.softAP("Dragster_ESP32", "12345678");
+  ArduinoOTA.setHostname("DragsterPID");
+  ArduinoOTA.begin();
+  
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html);
   });
@@ -101,96 +110,76 @@ void setup() {
     if (request->hasParam("param") && request->hasParam("value")) {
       String param = request->getParam("param")->value();
       float val = request->getParam("value")->value().toFloat();
-      if(param == "kp") kp = val;
-      if(param == "ki") ki = val;
-      if(param == "kd") kd = val;
+      if(param == "kp") Kp = val;
+      if(param == "ki") Ki = val;
+      if(param == "kd") Kd = val;
+      if(param == "vel") baseSpeed = (int)val;
     }
     request->send(200);
   });
 
-  // As rotas de direção agora SÓ mudam o estado!
-  server.on("/frente", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "frente"; request->send(200); });
-  server.on("/tras", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "tras"; request->send(200); });
-  server.on("/esquerda", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "esquerda"; request->send(200); });
-  server.on("/direita", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "direita"; request->send(200); });
-  
-  server.on("/parar", HTTP_GET, [](AsyncWebServerRequest *request){ 
-    estadoCarro = "parar"; 
-    // Trava instantaneamente na posição em que as rodas estão agora
-    target1 = enc1.getCount(); 
-    target2 = enc2.getCount(); 
-    request->send(200); 
-  });
+  server.on("/calibrar", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "calibrar"; request->send(200); });
+  server.on("/correr", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "correr"; request->send(200); });
+  server.on("/parar", HTTP_GET, [](AsyncWebServerRequest *request){ estadoCarro = "parar"; request->send(200); });
 
   server.begin();
-
-  // 3. Hardware
-  pinMode(M1_ENCA, INPUT_PULLUP); pinMode(M1_ENCB, INPUT_PULLUP);
-  pinMode(M2_ENCA, INPUT_PULLUP); pinMode(M2_ENCB, INPUT_PULLUP);
-  enc1.attachFullQuad(M1_ENCA, M1_ENCB);
-  enc2.attachFullQuad(M2_ENCA, M2_ENCB);
-  enc1.clearCount(); enc2.clearCount();
-
-  pinMode(M1_PWM, OUTPUT); pinMode(M1_DIR, OUTPUT);
-  pinMode(M2_PWM, OUTPUT); pinMode(M2_DIR, OUTPUT);
-  
-  target1 = 0; target2 = 0;
 }
 
 void loop() {
-  ArduinoOTA.handle(); // Mantém o ESP à escuta para receber código novo!
+  ArduinoOTA.handle(); // Atualizações via rede ligadas!
 
-  long currT = micros();
-  float deltaT = ((float) (currT - prevT)) / 1.0e6;
-  if (deltaT < 0.01) return; // Corre a cada 10ms
-  prevT = currT;
-
-  // ==========================================
-  // O GERADOR DE TRAJETÓRIA CONTÍNUA (MÁGICA!)
-  // ==========================================
-  int vel_alvo = 50; // Passos adicionados a cada 10ms (Aumenta para ir mais rápido)
+  if (estadoCarro == "parar") {
+    setMotor(0, M1_PWM, M1_DIR);
+    setMotor(0, M2_PWM, M2_DIR);
+  } 
   
-  if (estadoCarro == "frente") {
-    target1 += vel_alvo; target2 += vel_alvo;
-  } else if (estadoCarro == "tras") {
-    target1 -= vel_alvo; target2 -= vel_alvo;
-  } else if (estadoCarro == "esquerda") {
-    target1 += vel_alvo/2; target2 -= vel_alvo/2;
-  } else if (estadoCarro == "direita") {
-    target1 -= vel_alvo/2; target2 += vel_alvo/2;
+  else if (estadoCarro == "calibrar") {
+    // Faz a "dança da calibração" (Roda sobre o próprio eixo)
+    setMotor(70, M1_PWM, M1_DIR);
+    setMotor(-70, M2_PWM, M2_DIR);
+    
+    // Calibra 200 vezes para perceber bem a luz
+    for (uint16_t i = 0; i < 200; i++) {
+      qtr.calibrate();
+      delay(20);
+    }
+    
+    setMotor(0, M1_PWM, M1_DIR);
+    setMotor(0, M2_PWM, M2_DIR);
+    estadoCarro = "parar"; 
+  } 
+  
+  else if (estadoCarro == "correr") {
+    // Lê a posição. Como são 6 sensores, o centro exato é o 2500.
+    uint16_t position = qtr.readLineBlack(sensorValues);
+    
+    int error = 2500 - position;
+
+    // Cálculo do PID puro
+    int P = error;
+    I = I + error;
+    int D = error - lastError;
+    lastError = error;
+
+    float motorSpeedCorrection = (P * Kp) + (I * Ki) + (D * Kd);
+
+    // Ajusta a velocidade de cada motor (Se o teu virar ao contrário, troca os sinais + e -)
+    int motorSpeedA = baseSpeed + motorSpeedCorrection; 
+    int motorSpeedB = baseSpeed - motorSpeedCorrection;
+
+    setMotor(motorSpeedA, M1_PWM, M1_DIR);
+    setMotor(motorSpeedB, M2_PWM, M2_DIR);
   }
-
-  // ==========================================
-  // PID (Correção)
-  // ==========================================
-  long p1 = enc1.getCount();
-  long p2 = enc2.getCount();
-
-  int e1 = target1 - p1;
-  if (abs(e1) < 10) { e1 = 0; eintegral1 = 0; }
-  float dedt1 = (e1 - eprev1) / deltaT;
-  eintegral1 += e1 * deltaT;
-  float u1 = (kp * e1) + (kd * dedt1) + (ki * eintegral1);
-  eprev1 = e1;
-
-  int e2 = target2 - p2;
-  if (abs(e2) < 10) { e2 = 0; eintegral2 = 0; }
-  float dedt2 = (e2 - eprev2) / deltaT;
-  eintegral2 += e2 * deltaT;
-  float u2 = (kp * e2) + (kd * dedt2) + (ki * eintegral2);
-  eprev2 = e2;
-
-  setMotor((int)u1, M1_PWM, M1_DIR);
-  setMotor((int)u2, M2_PWM, M2_DIR);
 }
 
+// O teu controlador de motores, já com limite máximo de 255
 void setMotor(int speed, int pinPWM, int pinDIR) {
-  int minPWM = 15; 
-  if (speed > 0) { digitalWrite(pinDIR, HIGH); if (speed < minPWM) speed = minPWM; } 
-  else if (speed < 0) { digitalWrite(pinDIR, LOW); if (speed > -minPWM) speed = -minPWM; } 
+  if (speed > 0) { digitalWrite(pinDIR, HIGH); } 
+  else if (speed < 0) { digitalWrite(pinDIR, LOW); } 
   else { speed = 0; }
   
-  if (speed > 150) speed = 150;
-  if (speed < -150) speed = -150;
+  if (speed > 255) speed = 255;
+  if (speed < -255) speed = -255;
+  
   analogWrite(pinPWM, abs(speed)); 
 }
