@@ -150,9 +150,32 @@ void loop() {
   } 
   
   else if (estadoCarro == "correr") {
-    // Lê a posição. Como são 6 sensores, o centro exato é o 2500.
+    // 1. Lê a posição e atualiza os valores de cada sensor
     uint16_t position = qtr.readLineBlack(sensorValues);
     
+    // ==========================================
+    // DETEÇÃO DA META (A TUA LÓGICA)
+    // ==========================================
+    int sensoresNoPreto = 0;
+    for (int i = 0; i < SensorCount; i++) {
+      // A biblioteca dá valores de 0 (Branco) a 1000 (Preto puro). 
+      // 600 é um limite super seguro.
+      if (sensorValues[i] > 600) { 
+        sensoresNoPreto++;
+      }
+    }
+
+    // Se 5 ou mais sensores virem a linha preta... TRAVA!
+    if (sensoresNoPreto >= 5) {
+      setMotor(0, M1_PWM, M1_DIR);
+      setMotor(0, M2_PWM, M2_DIR);
+      estadoCarro = "parar"; // Bloqueia o robô
+      Serial.println("META DETETADA!");
+      return; // Aborta o resto do código para não fazer o PID!
+    }
+    // ==========================================
+
+    // 2. Se não for a meta, faz o PID normal: 
     int error = 2500 - position;
 
     // Cálculo do PID puro
@@ -164,8 +187,8 @@ void loop() {
     float motorSpeedCorrection = (P * Kp) + (I * Ki) + (D * Kd);
 
     // Ajusta a velocidade de cada motor (Se o teu virar ao contrário, troca os sinais + e -)
-    int motorSpeedA = baseSpeed + motorSpeedCorrection; 
-    int motorSpeedB = baseSpeed - motorSpeedCorrection;
+    int motorSpeedA = baseSpeed - motorSpeedCorrection; 
+    int motorSpeedB = baseSpeed + motorSpeedCorrection;
 
     setMotor(motorSpeedA, M1_PWM, M1_DIR);
     setMotor(motorSpeedB, M2_PWM, M2_DIR);
