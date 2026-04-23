@@ -2,7 +2,8 @@
 #include <ESPAsyncWebServer.h>
 #include <QTRSensors.h>
 #include <ArduinoOTA.h> 
-
+#include <Preferences.h>
+Preferences memoria;
 // ==========================================
 // PÁGINA WEB (A TUA BOX DE AFINAÇÃO)
 // ==========================================
@@ -134,20 +135,64 @@ void loop() {
   } 
   
   else if (estadoCarro == "calibrar") {
-    // Faz a "dança da calibração" (Roda sobre o próprio eixo)
-    setMotor(70, M1_PWM, M1_DIR);
-    setMotor(-70, M2_PWM, M2_DIR);
+    Serial.println("A calibrar (Dança Curta)...");
     
-    // Calibra 200 vezes para perceber bem a luz
-    for (uint16_t i = 0; i < 200; i++) {
-      qtr.calibrate();
-      delay(20);
+    // Repete o "abanar a cabeça" 2 vezes para garantir uma leitura perfeita
+    for (int ciclo = 0; ciclo < 2; ciclo++) {
+      if (estadoCarro == "parar") break; // Verifica a emergência no início do ciclo
+      
+      // 1. Vira ligeiramente para a Direita
+      setMotor(50, M1_PWM, M1_DIR);
+      setMotor(-50, M2_PWM, M2_DIR);
+      for (int i = 0; i < 10; i++) { 
+        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        qtr.calibrate(); 
+        delay(10); 
+      }
+      
+      if (estadoCarro == "parar") break; // Verifica antes de mudar de direção
+
+      // 2. Vira para a Esquerda
+      setMotor(-50, M1_PWM, M1_DIR);
+      setMotor(50, M2_PWM, M2_DIR);
+      for (int i = 0; i < 20; i++) { 
+        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        qtr.calibrate(); 
+        delay(10); 
+      }
+      
+      if (estadoCarro == "parar") break; // Verifica antes de mudar de direção
+
+      // 3. Volta a virar para a Direita
+      setMotor(50, M1_PWM, M1_DIR);
+      setMotor(-50, M2_PWM, M2_DIR);
+      for (int i = 0; i < 10; i++) { 
+        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        qtr.calibrate(); 
+        delay(10); 
+      }
     }
-    
+
+    // Corta a corrente aos motores seja porque acabou ou porque abortaste
     setMotor(0, M1_PWM, M1_DIR);
     setMotor(0, M2_PWM, M2_DIR);
-    estadoCarro = "parar"; 
-  } 
+    
+    // ==========================================
+    // GRAVAR CALIBRAÇÃO NA MEMÓRIA DO ESP32
+    // ==========================================
+    memoria.begin("calibracao", false); // "false" significa modo de escrita
+    // Guardar os valores mínimos (branco) e máximos (preto) lidos pelos sensores
+    memoria.putBytes("minimos", qtr.calibrationOn.minimum, SensorCount * sizeof(uint16_t));
+    memoria.putBytes("maximos", qtr.calibrationOn.maximum, SensorCount * sizeof(uint16_t));
+    memoria.end();
+    
+    Serial.println("Calibração guardada na memória permanente!");
+
+    // Se o ciclo acabou naturalmente, mete no estado "parar" à espera da próxima ordem
+    if (estadoCarro != "parar") {
+      estadoCarro = "parar"; 
+    }
+  }
   
   else if (estadoCarro == "correr") {
     // 1. Lê a posição e atualiza os valores de cada sensor
