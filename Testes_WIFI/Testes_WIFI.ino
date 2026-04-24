@@ -3,7 +3,9 @@
 #include <QTRSensors.h>
 #include <ArduinoOTA.h> 
 #include <Preferences.h>
+
 Preferences memoria;
+
 // ==========================================
 // PÁGINA WEB (A TUA BOX DE AFINAÇÃO)
 // ==========================================
@@ -62,12 +64,14 @@ AsyncWebServer server(80);
 QTRSensors qtr;
 
 // ==========================================
-// PINOS FISICOS (Conforme a tua imagem!)
+// PINOS FISICOS
 // ==========================================
-// Os teus 6 pinos de Ouro (ADC1)
-const uint8_t SensorCount = 6;
+// OS PINOS DE OURO (ADC1)
+const uint8_t SensorCount = 5; // <--- Passa de 6 para 5
 uint16_t sensorValues[SensorCount];
-const uint8_t qtrPins[] = {36, 39, 34, 35, 32, 33};
+
+// Coloca aqui a ordem exata dos pinos analógicos do ESP32 onde ligaste o D3 ao D7
+const uint8_t qtrPins[] = {39, 34, 35, 32, 33};
 
 // Os pinos dos teus Motores
 #define M1_PWM 19 
@@ -78,7 +82,7 @@ const uint8_t qtrPins[] = {36, 39, 34, 35, 32, 33};
 // ==========================================
 // VARIÁVEIS DO PID E ESTADO
 // ==========================================
-float Kp = 0.05, Kd = 0.80, Ki = 0.00;
+float Kp = 0.03, Kd = 0.80, Ki = 0.00;
 int baseSpeed = 100;
 int lastError = 0;
 float I = 0;
@@ -90,7 +94,7 @@ void setMotor(int speed, int pinPWM, int pinDIR);
 void setup() {
   Serial.begin(115200);
 
-  // 1. Configurar QTR como ANALÓGICO!
+  // 1. Configurar QTR como ANALÓGICO
   qtr.setTypeAnalog();
   qtr.setSensorPins(qtrPins, SensorCount);
 
@@ -139,91 +143,80 @@ void loop() {
     
     // Repete o "abanar a cabeça" 2 vezes para garantir uma leitura perfeita
     for (int ciclo = 0; ciclo < 2; ciclo++) {
-      if (estadoCarro == "parar") break; // Verifica a emergência no início do ciclo
+      if (estadoCarro == "parar") break; 
       
-      // 1. Vira ligeiramente para a Direita
       setMotor(50, M1_PWM, M1_DIR);
       setMotor(-50, M2_PWM, M2_DIR);
       for (int i = 0; i < 10; i++) { 
-        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        if (estadoCarro == "parar") break; 
         qtr.calibrate(); 
         delay(10); 
       }
       
-      if (estadoCarro == "parar") break; // Verifica antes de mudar de direção
+      if (estadoCarro == "parar") break; 
 
-      // 2. Vira para a Esquerda
       setMotor(-50, M1_PWM, M1_DIR);
       setMotor(50, M2_PWM, M2_DIR);
       for (int i = 0; i < 20; i++) { 
-        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        if (estadoCarro == "parar") break; 
         qtr.calibrate(); 
         delay(10); 
       }
       
-      if (estadoCarro == "parar") break; // Verifica antes de mudar de direção
+      if (estadoCarro == "parar") break; 
 
-      // 3. Volta a virar para a Direita
       setMotor(50, M1_PWM, M1_DIR);
       setMotor(-50, M2_PWM, M2_DIR);
       for (int i = 0; i < 10; i++) { 
-        if (estadoCarro == "parar") break; // Checkpoint de emergência!
+        if (estadoCarro == "parar") break; 
         qtr.calibrate(); 
         delay(10); 
       }
     }
 
-    // Corta a corrente aos motores seja porque acabou ou porque abortaste
     setMotor(0, M1_PWM, M1_DIR);
     setMotor(0, M2_PWM, M2_DIR);
     
     // ==========================================
     // GRAVAR CALIBRAÇÃO NA MEMÓRIA DO ESP32
     // ==========================================
-    memoria.begin("calibracao", false); // "false" significa modo de escrita
-    // Guardar os valores mínimos (branco) e máximos (preto) lidos pelos sensores
+    memoria.begin("calibracao", false); 
     memoria.putBytes("minimos", qtr.calibrationOn.minimum, SensorCount * sizeof(uint16_t));
     memoria.putBytes("maximos", qtr.calibrationOn.maximum, SensorCount * sizeof(uint16_t));
     memoria.end();
     
     Serial.println("Calibração guardada na memória permanente!");
 
-    // Se o ciclo acabou naturalmente, mete no estado "parar" à espera da próxima ordem
     if (estadoCarro != "parar") {
       estadoCarro = "parar"; 
     }
   }
   
   else if (estadoCarro == "correr") {
-    // 1. Lê a posição e atualiza os valores de cada sensor
     uint16_t position = qtr.readLineBlack(sensorValues);
     
-    // ==========================================
-    // DETEÇÃO DA META (A TUA LÓGICA)
+// ==========================================
+    // DETEÇÃO DA META 
     // ==========================================
     int sensoresNoPreto = 0;
     for (int i = 0; i < SensorCount; i++) {
-      // A biblioteca dá valores de 0 (Branco) a 1000 (Preto puro). 
-      // 600 é um limite super seguro.
       if (sensorValues[i] > 600) { 
         sensoresNoPreto++;
       }
     }
 
-    // Se 5 ou mais sensores virem a linha preta... TRAVA!
-    if (sensoresNoPreto >= 5) {
+    // Passa de >= 5 para >= 4
+    if (sensoresNoPreto >= 4) {
       setMotor(0, M1_PWM, M1_DIR);
       setMotor(0, M2_PWM, M2_DIR);
-      estadoCarro = "parar"; // Bloqueia o robô
+      estadoCarro = "parar"; 
       Serial.println("META DETETADA!");
-      return; // Aborta o resto do código para não fazer o PID!
+      return; 
     }
-    // ==========================================
 
-    // 2. Se não for a meta, faz o PID normal: 
-    int error = 2500 - position;
+    // Cálculo do PID
+    int error = 2000 - position;
 
-    // Cálculo do PID puro
     int P = error;
     I = I + error;
     int D = error - lastError;
@@ -231,7 +224,6 @@ void loop() {
 
     float motorSpeedCorrection = (P * Kp) + (I * Ki) + (D * Kd);
 
-    // Ajusta a velocidade de cada motor (Se o teu virar ao contrário, troca os sinais + e -)
     int motorSpeedA = baseSpeed - motorSpeedCorrection; 
     int motorSpeedB = baseSpeed + motorSpeedCorrection;
 
@@ -240,7 +232,7 @@ void loop() {
   }
 }
 
-// O teu controlador de motores, já com limite máximo de 255
+// O teu controlador de motores
 void setMotor(int speed, int pinPWM, int pinDIR) {
   if (speed > 0) { digitalWrite(pinDIR, HIGH); } 
   else if (speed < 0) { digitalWrite(pinDIR, LOW); } 
