@@ -23,7 +23,7 @@ const uint8_t qtrPins[] = {36, 39, 34, 35, 32, 33}; // <-- Só 6 pinos
 float Kp = 0.03; // Ajustem conforme a nova velocidade
 float Kd = 1; 
 float Ki = 0; 
-int baseSpeed = 255;  // 230 kp=0.03 kd=1 tava bom 
+int baseSpeed = 250;  // 230 kp=0.03 kd=1 tava bom 
 
 unsigned long tempoArranque = 0;
 int thresholdLuz = 0;
@@ -84,8 +84,8 @@ void setup() {
     delay(20);
   }
   
-  thresholdLuz = (somaLuz / 20) + 300; 
-  if (thresholdLuz > 3500) thresholdLuz = 3500;
+  thresholdLuz = (somaLuz / 20) + 200; 
+  if (thresholdLuz > 3800) thresholdLuz = 3800;
 
   Serial.println("ARMADO! À espera do Semáforo...");
   estadoCarro = "espera_semaforo";
@@ -113,10 +113,10 @@ void loop() {
     // Durante os primeiros 800 milissegundos (0.8 segundos) após o arranque
     if (tempoNaCorrida < 800) { 
       // Sobe a velocidade progressivamente de 220 até 255
-      baseSpeed = map(tempoNaCorrida, 0, 800, 220, 255); 
+      baseSpeed = map(tempoNaCorrida, 0, 800, 210, 250); 
     } else {
       // Passaram os 800ms? O carro já estabilizou no chão, prego a fundo!
-      baseSpeed = 255; 
+      baseSpeed = 250; 
     }
     
     // 1. LEITURA DA POSIÇÃO (Lógica QTR)
@@ -161,7 +161,7 @@ void setMotor(int speed, int pinPWM, int pinDIR) {
   else if (speed < 0) digitalWrite(pinDIR, LOW);
   else speed = 0;
   
-  if (speed > 255) speed = 255;
-  if (speed < -255) speed = -255;
+  if (speed > 250) speed = 250;
+  if (speed < -250) speed = -250;
   analogWrite(pinPWM, abs(speed)); 
 }
